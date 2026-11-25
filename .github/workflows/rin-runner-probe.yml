@@ -1,0 +1,9 @@
+name: Hosted runner reachability probe
+on: [push]
+permissions: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: echo "Synthetic runner is reachable"
