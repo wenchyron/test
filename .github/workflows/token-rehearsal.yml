@@ -1,0 +1,75 @@
+name: Synthetic Actions token rehearsal
+on:
+  push:
+    branches: [rin-release-token-rehearsal]
+permissions: {}
+concurrency:
+  group: rin-release-token-rehearsal
+  queue: max
+jobs:
+  verify:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reproduce synthetic issue and audit exact candidate
+        run: |
+          GITHUB_REF_NAME=rin-release-rehearsal/regression python3 tests/hosted_rehearsal.py
+          git fetch --no-tags origin refs/heads/rin-release-rehearsal-repair
+          test "$(git rev-parse FETCH_HEAD)" = 0c12c587b5ea674798bb26a71d0962d7f1211cd1
+          git diff --binary "$(tail -n1 fixtures/approved-sources.txt)" FETCH_HEAD -- fixtures/ops-stock.py tests/test_repaired_stock.py | cmp - out/ops/candidate.patch
+          git switch --detach FETCH_HEAD
+          python3 -m unittest discover -s tests -p test_repaired_stock.py
+  publish:
+    if: github.repository == 'wenchyron/test' && github.ref == 'refs/heads/rin-release-token-rehearsal'
+    needs: verify
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Create or update just the pinned sandbox draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo=repos/wenchyron/test
+          base=rin-release-rehearsal-base
+          head=rin-release-token-rehearsal-repair
+          candidate=0c12c587b5ea674798bb26a71d0962d7f1211cd1
+          marker='<!-- rehearsal:github-actions-token:synthetic-ops-stock-v1 -->'
+          test "$(gh api "$repo/git/ref/heads/$base" --jq .object.sha)" = c8af269a253a5539307ea087d1173a54dc0c4d9d
+          prs="$(gh api -X GET "$repo/pulls" -f state=all -f "base=$base" -f "head=wenchyron:$head")"
+          count="$(jq length <<<"$prs")"
+          evidence="https://github.com/wenchyron/test/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT"
+          if [ "$count" = 0 ]; then
+            if gh api "$repo/git/ref/heads/$head" --silent 2>err; then
+              echo "Orphan test branch requires inspection"
+              exit 1
+            fi
+            grep -q 'HTTP 404' err
+            test "$(gh api -X POST "$repo/git/refs" -f "ref=refs/heads/$head" -f "sha=$candidate" --jq .object.sha)" = "$candidate"
+            body="$(printf '%s\n\nSynthetic permission rehearsal only. Do not merge. Same test: 5 fails, 6 passes.\n\nFirst evidence: %s\n' "$marker" "$evidence")"
+            result="$(gh api -X POST "$repo/pulls" -f title='Synthetic Actions token write rehearsal' -f "head=$head" -f "base=$base" -F draft=true -f "body=$body")"
+            operation=create
+          elif [ "$count" = 1 ]; then
+            jq -e --arg sha "$candidate" --arg marker "$marker" '.[0]|.draft and .state=="open" and .head.sha==$sha and (.body|contains($marker))' <<<"$prs" >/dev/null
+            number="$(jq -r '.[0].number' <<<"$prs")"
+            body="$(jq -r '.[0].body' <<<"$prs")"
+            if [[ "$body" != *"$evidence"* ]]; then
+              body="$(printf '%s\n\nRepeat evidence: %s\n' "$body" "$evidence")"
+            fi
+            result="$(gh api -X PATCH "$repo/pulls/$number" -f "body=$body")"
+            operation=update
+          else
+            echo "Unexpected duplicate drafts"
+            exit 1
+          fi
+          jq -e --arg sha "$candidate" --arg base "$base" --arg head "$head"             '.draft and .state=="open" and .base.ref==$base and .head.ref==$head and .head.sha==$sha and .user.login=="github-actions[bot]"'             <<<"$result" >/dev/null
+          echo "$operation: $(jq -r .html_url <<<"$result")" | tee -a "$GITHUB_STEP_SUMMARY"
