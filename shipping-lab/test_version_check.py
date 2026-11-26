@@ -25,6 +25,7 @@ class SameVersionTests(unittest.TestCase):
         script = Path(__file__).with_name("version_check.py")
         for observed, expected, output, status in (
             ("2128", "2128", "accepted\n", 0),
+            ("21280", "2128", "rejected\n", 1),
             ("2129", "2128", "rejected\n", 1),
             ("", "2128", "rejected\n", 1),
         ):
