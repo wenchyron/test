@@ -1,0 +1,25 @@
+name: Dots shipping rehearsal
+
+on:
+  pull_request:
+    paths:
+      - 'shipping-lab/**'
+      - '.github/workflows/dots-shipping-rehearsal.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'shipping-lab/**'
+      - '.github/workflows/dots-shipping-rehearsal.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s shipping-lab -p 'test_*.py' -v
