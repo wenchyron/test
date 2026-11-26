@@ -4,7 +4,7 @@ import argparse
 
 
 def same_version(observed, expected):
-    return bool(observed and expected and observed.startswith(expected))
+    return bool(observed and expected and observed == expected)
 
 
 def main():
